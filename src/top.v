@@ -15,7 +15,10 @@ module top
     input wire sdMiso,
     output wire sdCs,
     input wire btn1,
-    input wire btn2
+    input wire btn2,
+    input uart_rx,
+    output uart_tx,
+    output reg [5:0] led
 );
     wire [9:0] pixelAddress;
     wire [7:0] textPixelData;
@@ -51,6 +54,9 @@ module top
         sdCs,
         charAddress[4:0],
         sdCharOutput,
+        uart_rx,
+        uart_tx,
+        led,
         btn1 ? 1'b1 : 1'b0,
         btn2 ? 1'b1 : 1'b0
     );

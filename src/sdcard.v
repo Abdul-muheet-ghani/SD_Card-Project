@@ -1,4 +1,24 @@
 
+localparam STATE_INIT = 0;
+localparam STATE_RESET_CMD = 1;
+localparam STATE_SEND_BYTES = 2;
+localparam STATE_SEND_BYTES_DATA = 3;
+localparam STATE_WAIT_FOR_RECV = 4;
+localparam STATE_READ_DATA = 5;
+localparam STATE_INIT_CMD = 6;
+localparam STATE_CHECK_VERSION = 7;
+localparam STATE_APP_COMMAND = 8;
+localparam STATE_SEND_SD_START = 9;
+localparam STATE_CHECK_INIT = 10;
+localparam STATE_SEND_READ_BLOCK = 11;
+localparam STATE_SET_BLOCK_LENGTH = 12;
+localparam STATE_WRITE_DATA = 13;
+localparam STATE_WRITE_DATA_BLOCK = 14;
+localparam STATE_CHECK_READ_RESP = 15;
+localparam STATE_WAIT_FOR_DATABLOCK = 16;
+localparam STATE_READ_BLOCK = 17;
+localparam STATE_DATA_READY = 18;
+localparam STATE_ERROR = 19;
 module toHex(
     input wire clk,
     input wire [3:0] value,
@@ -40,22 +60,6 @@ module spiPhy(
 );
 
 localparam STATE_IDLE = 0;
-localparam STATE_RESET_CMD = 1;
-localparam STATE_SEND_BYTES = 2;
-localparam STATE_SEND_BYTES_DATA = 3;
-localparam STATE_WAIT_FOR_RECV = 4;
-localparam STATE_READ_DATA = 5;
-localparam STATE_INIT_CMD = 6;
-localparam STATE_CHECK_VERSION = 7;
-localparam STATE_APP_COMMAND = 8;
-localparam STATE_SEND_SD_START = 9;
-localparam STATE_CHECK_INIT = 10;
-localparam STATE_SEND_READ_BLOCK = 11;
-localparam STATE_CHECK_READ_RESP = 12;
-localparam STATE_WAIT_FOR_DATABLOCK = 13;
-localparam STATE_READ_BLOCK = 14;
-localparam STATE_DATA_READY = 15;
-localparam STATE_ERROR = 16;
 
 
 reg highSpeed = 0;
@@ -163,27 +167,14 @@ module sdcard(
     output reg sdCs = 1,
     input wire [4:0] charAddress,
     output reg [7:0] charOutput = "S",
+    input uart_rx,
+    output uart_tx,
+    output reg [5:0] led,
     input wire btn1,
     input wire btn2
 );
 
-localparam STATE_INIT = 0;
-localparam STATE_RESET_CMD = 1;
-localparam STATE_SEND_BYTES = 2;
-localparam STATE_SEND_BYTES_DATA = 3;
-localparam STATE_WAIT_FOR_RECV = 4;
-localparam STATE_READ_DATA = 5;
-localparam STATE_INIT_CMD = 6;
-localparam STATE_CHECK_VERSION = 7;
-localparam STATE_APP_COMMAND = 8;
-localparam STATE_SEND_SD_START = 9;
-localparam STATE_CHECK_INIT = 10;
-localparam STATE_SEND_READ_BLOCK = 11;
-localparam STATE_CHECK_READ_RESP = 12;
-localparam STATE_WAIT_FOR_DATABLOCK = 13;
-localparam STATE_READ_BLOCK = 14;
-localparam STATE_DATA_READY = 15;
-localparam STATE_ERROR = 16;
+
 
 reg [5:0] state = 0;
 reg [5:0] returnState = 0;
@@ -193,6 +184,7 @@ reg [5:0] bitsToSend = 0;
 reg [39:0] bytesReceived = 0;
 reg [7:0] bitsToReceive = 0;
 reg [7:0] counter = 0;
+reg [8:0] counter_data_send;
 
 reg [6:0] byteNumber = 0;
 reg [6:0] addressStepper = 0;
@@ -203,6 +195,21 @@ initial begin
     for (i = 0; i < 128; i = i + 1) begin
         memory1[i] = 32'd0;
     end
+end
+
+always @(posedge clk)begin 
+    testMemory[0] <= memory1[0][7:0];
+    testMemory[1] <= memory1[1][7:0];
+    testMemory[2] <= memory1[2][7:0];
+    testMemory[3] <= memory1[3][7:0];
+    testMemory[4] <= memory1[4][7:0];
+    testMemory[5] <= memory1[5][7:0];
+    testMemory[6] <= memory1[6][7:0];
+    testMemory[7] <= memory1[7][7:0];
+    testMemory[8] <= memory1[8][7:0];
+    testMemory[9] <= memory1[9][7:0];
+    testMemory[10] <=memory1[10][7:0];
+    testMemory[11] <=memory1[11][7:0];
 end
 
 always @(posedge clk) begin
@@ -347,11 +354,62 @@ always @(posedge clk) begin
             end
             STATE_CHECK_INIT: begin
                 if (bytesReceived[7:0] == 8'd0) begin
-                    state <= STATE_SEND_READ_BLOCK;
+                    state <= STATE_SET_BLOCK_LENGTH;
                 end
                 else if (bytesReceived[7:0] == 8'd1) begin
                     state <= STATE_APP_COMMAND;
                 end
+            end
+            STATE_SET_BLOCK_LENGTH: begin
+                bytesToSend <= {
+                    8'h50, // CMD16 set write block
+                    32'h00000200, // address 0
+                    8'h00  // CRC
+                };
+                bitsToSend <= 6'd48;
+                state <= STATE_SEND_BYTES;
+                sdClk <= 0;
+                returnState <= STATE_WRITE_DATA;
+                bitsToReceive <= 8'd8;
+                byteNumber <= 0;
+            end
+            STATE_WRITE_DATA: begin
+                bytesToSend <= {
+                    8'h58, // CMD24 write block
+                    32'h00000000, // address 0
+                    8'h00  // CRC
+                };
+                bitsToSend <= 6'd48;
+                state <= STATE_SEND_BYTES;
+                sdClk <= 0;
+                returnState <= STATE_WRITE_DATA_BLOCK;
+                bitsToReceive <= 8'd8;
+                byteNumber <= 0;
+            end
+            STATE_WRITE_DATA_BLOCK: begin
+                if(counter_data_send == 0 || counter_data_send == 513) begin
+                    bytesToSend <= {
+                        8'hFE // key token
+                    };
+                    bitsToSend <= 6'd8;
+                    state <= STATE_WRITE_DATA_BLOCK;
+                    sdClk <= 0;
+                end
+                else if(counter_data_send > 0 && counter_data_send < 512)begin
+                    bytesToSend <= {
+                        8'h61 // key token
+                    };
+                    bitsToSend <= 6'd8;
+                    state <= STATE_WRITE_DATA_BLOCK;
+                    sdClk <= 0;
+                end
+                else begin
+                    returnState <= STATE_SEND_READ_BLOCK;
+                    bitsToReceive <= 8'd8;
+                    byteNumber <= 0; 
+                    counter_data_send = 0;
+                end
+                counter_data_send = counter_data_send + 1;
             end
             STATE_SEND_READ_BLOCK: begin
                 bytesToSend <= {
@@ -488,4 +546,145 @@ always @(posedge clk) begin
     end
 end
 
+/////////////////////////////////////////////////////////////
+
+localparam DELAY_FRAMES = 234;
+localparam HALF_DELAY_WAIT = (DELAY_FRAMES / 2);
+
+reg [3:0] rxState = 0;
+reg [12:0] rxCounter = 0;
+reg [7:0] dataIn = 0;
+reg [2:0] rxBitNumber = 0;
+reg byteReady = 0;
+
+localparam RX_STATE_IDLE = 0;
+localparam RX_STATE_START_BIT = 1;
+localparam RX_STATE_READ_WAIT = 2;
+localparam RX_STATE_READ = 3;
+localparam RX_STATE_STOP_BIT = 5;
+
+always @(posedge clk) begin
+    case (rxState)
+        RX_STATE_IDLE: begin
+            if (uart_rx == 0) begin
+                rxState <= RX_STATE_START_BIT;
+                rxCounter <= 1;
+                rxBitNumber <= 0;
+                byteReady <= 0;
+            end
+        end 
+        RX_STATE_START_BIT: begin
+            if (rxCounter == HALF_DELAY_WAIT) begin
+                rxState <= RX_STATE_READ_WAIT;
+                rxCounter <= 1;
+            end else 
+                rxCounter <= rxCounter + 1;
+        end
+        RX_STATE_READ_WAIT: begin
+            rxCounter <= rxCounter + 1;
+            if ((rxCounter + 1) == DELAY_FRAMES) begin
+                rxState <= RX_STATE_READ;
+            end
+        end
+        RX_STATE_READ: begin
+            rxCounter <= 1;
+            dataIn <= {uart_rx, dataIn[7:1]};
+            rxBitNumber <= rxBitNumber + 1;
+            if (rxBitNumber == 3'b111)
+                rxState <= RX_STATE_STOP_BIT;
+            else
+                rxState <= RX_STATE_READ_WAIT;
+        end
+        RX_STATE_STOP_BIT: begin
+            rxCounter <= rxCounter + 1;
+            if ((rxCounter + 1) == DELAY_FRAMES) begin
+                rxState <= RX_STATE_IDLE;
+                rxCounter <= 0;
+                byteReady <= 1;
+            end
+        end
+    endcase
+end
+
+always @(posedge clk) begin
+    if (byteReady) begin
+        led <= ~dataIn[5:0];
+    end
+end
+
+reg [3:0] txState = 0;
+reg [24:0] txCounter = 0;
+reg [7:0] dataOut = 0;
+reg txPinRegister = 1;
+reg [2:0] txBitNumber = 0;
+reg [3:0] txByteCounter = 0;
+
+assign uart_tx = txPinRegister;
+
+localparam MEMORY_LENGTH = 12;
+reg [7:0] testMemory [MEMORY_LENGTH-1:0];
+
+localparam TX_STATE_IDLE = 0;
+localparam TX_STATE_START_BIT = 1;
+localparam TX_STATE_WRITE = 2;
+localparam TX_STATE_STOP_BIT = 3;
+localparam TX_STATE_DEBOUNCE = 4;
+
+always @(posedge clk) begin
+    case (txState)
+        TX_STATE_IDLE: begin
+            if (btn1 == 0) begin
+                txState <= TX_STATE_START_BIT;
+                txCounter <= 0;
+                txByteCounter <= 0;
+            end
+            else begin
+                txPinRegister <= 1;
+            end
+        end 
+        TX_STATE_START_BIT: begin
+            txPinRegister <= 0;
+            if ((txCounter + 1) == DELAY_FRAMES) begin
+                txState <= TX_STATE_WRITE;
+                dataOut <= testMemory[txByteCounter];
+                txBitNumber <= 0;
+                txCounter <= 0;
+            end else 
+                txCounter <= txCounter + 1;
+        end
+        TX_STATE_WRITE: begin
+            txPinRegister <= dataOut[txBitNumber];
+            if ((txCounter + 1) == DELAY_FRAMES) begin
+                if (txBitNumber == 3'b111) begin
+                    txState <= TX_STATE_STOP_BIT;
+                end else begin
+                    txState <= TX_STATE_WRITE;
+                    txBitNumber <= txBitNumber + 1;
+                end
+                txCounter <= 0;
+            end else 
+                txCounter <= txCounter + 1;
+        end
+        TX_STATE_STOP_BIT: begin
+            txPinRegister <= 1;
+            if ((txCounter + 1) == DELAY_FRAMES) begin
+                if (txByteCounter == MEMORY_LENGTH - 1) begin
+                    txState <= TX_STATE_DEBOUNCE;
+                end else begin
+                    txByteCounter <= txByteCounter + 1;
+                    txState <= TX_STATE_START_BIT;
+                end
+                txCounter <= 0;
+            end else 
+                txCounter <= txCounter + 1;
+        end
+        TX_STATE_DEBOUNCE: begin
+            if (txCounter == 23'b111111111111111111) begin
+                if (btn1 == 1) 
+                    txState <= TX_STATE_IDLE;
+            end else
+                txCounter <= txCounter + 1;
+        end
+    endcase      
+end
 endmodule
