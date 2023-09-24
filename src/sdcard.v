@@ -392,7 +392,7 @@ always @(posedge clk) begin
                         8'hFE // key token
                     };
                     bitsToSend <= 6'd8;
-                    state <= STATE_WRITE_DATA_BLOCK;
+                    state <= STATE_SEND_BYTES;
                     sdClk <= 0;
                 end
                 else if(counter_data_send > 0 && counter_data_send < 512)begin
@@ -400,7 +400,7 @@ always @(posedge clk) begin
                         8'h61 // key token
                     };
                     bitsToSend <= 6'd8;
-                    state <= STATE_WRITE_DATA_BLOCK;
+                    state <= STATE_SEND_BYTES;
                     sdClk <= 0;
                 end
                 else begin
